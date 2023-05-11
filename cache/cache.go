@@ -19,12 +19,18 @@ func (c *Cache) Set(key []byte, value []byte, ttl time.Duration) error {
 	c.lock.Lock()
 	defer c.lock.Unlock()
 	c.data[string(key)] = value
+
+	go func() {
+		<-time.After(ttl)
+		delete(c.data, string(key))
+	}()
+
 	return nil
 }
 
 func (c *Cache) Get(key []byte) ([]byte, error) {
 	c.lock.RLock()
-	defer c.lock.Unlock()
+	defer c.lock.RUnlock()
 	value, ok := c.data[string(key)]
 	if !ok {
 		return []byte(""), fmt.Errorf("key (%s) not found\n", key)
