@@ -1,8 +1,9 @@
-package main
+package proto
 
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"log"
 )
@@ -14,7 +15,7 @@ import (
 type Command byte
 
 const (
-	CmdNonce Command = iota
+	CmdNone Command = iota
 	CmdSet
 	CmdGet
 	CmdDel
@@ -28,6 +29,54 @@ type CommandSet struct {
 
 type CommandGet struct {
 	Key []byte
+}
+
+type Status byte
+
+const (
+	StatusNone Status = iota
+	StatusOK
+	StatusERR
+	StatusKeyNotFound
+)
+
+func (s Status) String() string {
+	switch s {
+	case StatusERR:
+		return "ERR"
+	case StatusOK:
+		return "OK"
+	case StatusKeyNotFound:
+		return "KEYNOTFOUND"
+	default:
+		return "NONE"
+	}
+}
+
+type ResponseGet struct {
+	Status Status
+	Value  []byte
+}
+
+type ResponseSet struct {
+	Status Status
+}
+
+func (r ResponseGet) Bytes() []byte {
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, r.Status)
+
+	valueLen := int32(len(r.Value))
+	binary.Write(buf, binary.LittleEndian, valueLen)
+	binary.Write(buf, binary.LittleEndian, r.Value)
+
+	return buf.Bytes()
+}
+
+func (r ResponseSet) Bytes() []byte {
+	buf := new(bytes.Buffer)
+	binary.Write(buf, binary.LittleEndian, r.Status)
+	return buf.Bytes()
 }
 
 func (c *CommandSet) Bytes() []byte {
@@ -52,16 +101,19 @@ func (c *CommandGet) Bytes() []byte {
 	return buf.Bytes()
 }
 
-func ParseCommand(r io.Reader) any {
+func ParseCommand(r io.Reader) (any, error) {
 	var cmd Command
-	binary.Read(r, binary.LittleEndian, &cmd)
+	err := binary.Read(r, binary.LittleEndian, &cmd)
+	if err != nil {
+		return nil, err
+	}
 	switch cmd {
 	case CmdSet:
-		return parseSetCommand(r)
+		return parseSetCommand(r), nil
 	case CmdGet:
-		return parseGetCommand(r)
+		return parseGetCommand(r), nil
 	default:
-		panic("invalid command")
+		return nil, fmt.Errorf("invalid command")
 	}
 
 }
@@ -117,4 +169,23 @@ func parseGetCommand(r io.Reader) *CommandGet {
 		log.Fatal(err)
 	}
 	return cmd
+}
+
+func ParseSetResponse(r io.Reader) (*ResponseSet, error) {
+	resp := &ResponseSet{}
+	err := binary.Read(r, binary.LittleEndian, &resp.Status)
+	return resp, err
+}
+
+func ParseGetResponse(r io.Reader) (*ResponseGet, error) {
+	resp := &ResponseGet{}
+	binary.Read(r, binary.LittleEndian, &resp.Status)
+
+	var valueLen int32
+	binary.Read(r, binary.LittleEndian, &valueLen)
+
+	resp.Value = make([]byte, valueLen)
+	binary.Read(r, binary.LittleEndian, &resp.Value)
+
+	return resp, nil
 }
