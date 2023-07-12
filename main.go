@@ -48,30 +48,39 @@ func main() {
 	}
 
 	go func() {
-		time.Sleep(time.Second * 2)
-		client, err := client.New(":3000", client.Options{})
-		if err != nil {
-			log.Fatal(err)
+		time.Sleep(time.Second * 10)
+		if opts.IsLeader {
+			sendDummyData()
 		}
-
-		err = client.Set(context.Background(), []byte("hello"), []byte("world"), 0)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		time.Sleep(time.Second * 1)
-		val, err := client.Get(context.Background(), []byte("hello"))
-		if err != nil {
-			log.Fatal(err)
-		}
-		fmt.Println(string(val))
-		// err = client.Set(context.Background(), []byte("hello"), []byte("world"), 0)
-		// if err != nil {
-		// 	log.Fatal(err)
-		// }
-		// client.Close()
 	}()
 
 	server := NewServer(opts, cache.New())
 	log.Fatal(server.Start())
+}
+func sendDummyData() {
+	for i := 0; i < 100; i++ {
+		go func(i int) {
+
+			key := []byte(fmt.Sprintf("key_%d", i))
+			value := []byte(fmt.Sprintf("val_%d", i))
+
+			client, err := client.New(":3000", client.Options{})
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			err = client.Set(context.Background(), key, value, 0)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			time.Sleep(time.Second * 1)
+			_, err = client.Get(context.Background(), key)
+			if err != nil {
+				log.Fatal(err)
+			}
+			// fmt.Println(string(val))
+			client.Close()
+		}(i)
+	}
 }

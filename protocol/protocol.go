@@ -19,6 +19,7 @@ const (
 	CmdSet
 	CmdGet
 	CmdDel
+	CmdJoin
 )
 
 type CommandSet struct {
@@ -29,6 +30,9 @@ type CommandSet struct {
 
 type CommandGet struct {
 	Key []byte
+}
+
+type CommandJoin struct {
 }
 
 type Status byte
@@ -112,6 +116,8 @@ func ParseCommand(r io.Reader) (any, error) {
 		return parseSetCommand(r), nil
 	case CmdGet:
 		return parseGetCommand(r), nil
+	case CmdJoin:
+		return &CommandJoin{}, nil
 	default:
 		return nil, fmt.Errorf("invalid command")
 	}

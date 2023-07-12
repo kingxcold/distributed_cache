@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"distributed_cache/cache"
+	"distributed_cache/client"
 	proto "distributed_cache/protocol"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -18,17 +21,28 @@ type ServerOpts struct {
 
 type Server struct {
 	ServerOpts
+
+	members map[*client.Client]struct{}
+
 	cache cache.Cacher
 }
 
 func NewServer(opts ServerOpts, c cache.Cacher) *Server {
-	return &Server{ServerOpts: opts, cache: c}
+	return &Server{ServerOpts: opts, cache: c, members: make(map[*client.Client]struct{})}
 }
 
 func (s *Server) Start() error {
 	ln, err := net.Listen("tcp", s.ListenAddr)
 	if err != nil {
 		return fmt.Errorf("listen error: %s", err)
+	}
+
+	if !s.IsLeader && len(s.LeaderAddr) != 0 {
+		go func() {
+			if err := s.dialLeader(); err != nil {
+				log.Println(err)
+			}
+		}()
 	}
 
 	log.Printf("server starting on port [%s]\n", s.ListenAddr)
@@ -44,6 +58,19 @@ func (s *Server) Start() error {
 	}
 }
 
+func (s *Server) dialLeader() error {
+	conn, err := net.Dial("tcp", s.LeaderAddr)
+	if err != nil {
+		return fmt.Errorf("failed to dial leader [%s]", s.LeaderAddr)
+	}
+	fmt.Println("Connected to learder ", s.LeaderAddr)
+
+	binary.Write(conn, binary.LittleEndian, proto.CmdJoin)
+
+	s.HandleConn(conn)
+	return nil
+}
+
 func (s *Server) HandleConn(conn net.Conn) {
 	defer conn.Close()
 	for {
@@ -56,7 +83,7 @@ func (s *Server) HandleConn(conn net.Conn) {
 		}
 		go s.handleCommand(conn, cmd)
 	}
-	fmt.Println("connection closed: ", conn.RemoteAddr())
+	// fmt.Println("connection closed: ", conn.RemoteAddr())
 }
 
 func (s *Server) handleCommand(conn net.Conn, cmd any) {
@@ -65,12 +92,29 @@ func (s *Server) handleCommand(conn net.Conn, cmd any) {
 		s.handleSetCommand(conn, v)
 	case *proto.CommandGet:
 		s.handleGetCommand(conn, v)
-	default:
+	case *proto.CommandJoin:
+		s.handleJoinCommand(conn, v)
 	}
+}
+
+func (s *Server) handleJoinCommand(conn net.Conn, cmd *proto.CommandJoin) error {
+	fmt.Println("member just joined the cluster: ", conn.RemoteAddr())
+	s.members[client.NewFromConn(conn)] = struct{}{}
+	return nil
 }
 
 func (s *Server) handleSetCommand(conn net.Conn, cmd *proto.CommandSet) error {
 	log.Printf("SET %s %s\n", cmd.Key, cmd.Value)
+
+	go func() {
+		for memeber := range s.members {
+			err := memeber.Set(context.TODO(), cmd.Key, cmd.Value, cmd.TTL)
+			if err != nil {
+				log.Println("forward to member error:", err)
+			}
+		}
+	}()
+
 	resp := proto.ResponseSet{}
 	if err := s.cache.Set(cmd.Key, cmd.Value, time.Duration(cmd.TTL)*time.Second); err != nil {
 		resp.Status = proto.StatusERR

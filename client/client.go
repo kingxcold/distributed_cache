@@ -13,6 +13,12 @@ type Client struct {
 
 type Options struct{}
 
+func NewFromConn(conn net.Conn) *Client {
+	return &Client{
+		conn: conn,
+	}
+}
+
 func New(endpoint string, opts Options) (*Client, error) {
 	conn, err := net.Dial("tcp", endpoint)
 	if err != nil {
@@ -34,7 +40,6 @@ func (c *Client) Get(ctx context.Context, key []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	fmt.Printf("%+v\n", resp)
 	if resp.Status == proto.StatusKeyNotFound {
 		return nil, fmt.Errorf("could not find key (%s)", key)
 	}
